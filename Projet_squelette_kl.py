@@ -4,20 +4,33 @@ import numpy as np
 import random as rnd
 from threading import Thread
 from queue import Queue
+import multiprocessing as mp
+from functools import partial
 
 
 disk_color = ['white', 'red', 'orange']
 disks = list()
 
+game = None
+window = None
+canvas1 = None
+information = None
+combobox_player1 = None
+combobox_player2 = None
+row_width = 100
+
 player_type = ['human']
-for i in range(42):
+for i in range(20):
     player_type.append('AI: alpha-beta level '+str(i+1))
 
 def max_value(board, depth, alpha, beta, player):
     if depth == 0 or board.check_victory() != 0:
         return board.eval(player)
+    possible_moves = board.get_possible_moves()
+    if not possible_moves:
+        return 0
     v = -float('inf')
-    for move in board.get_possible_moves():
+    for move in possible_moves:
         new_board = board.copy()
         new_board.add_disk(move, player, update_display=False)
         v = max(v, min_value(new_board, depth - 1, alpha, beta, 3 - player))
@@ -29,8 +42,11 @@ def max_value(board, depth, alpha, beta, player):
 def min_value(board, depth, alpha, beta, player):
     if depth == 0 or board.check_victory() != 0:
         return board.eval(player)
+    possible_moves = board.get_possible_moves()
+    if not possible_moves:
+        return 0
     v = float('inf')
-    for move in board.get_possible_moves():
+    for move in possible_moves:
         new_board = board.copy()
         new_board.add_disk(move, player, update_display=False)
         v = min(v, max_value(new_board, depth - 1, alpha, beta, 3 - player))
@@ -40,16 +56,40 @@ def min_value(board, depth, alpha, beta, player):
     return v
 
 def alpha_beta_decision(board, turn, ai_level, queue, max_player):
-    best_move = None
-    best_value = -float('inf')
-    for move in board.get_possible_moves():
+    """algorithme alpha-beta"""
+    possible_moves = board.get_possible_moves()
+    if not possible_moves:
+        queue.put(None)
+        return
+    
+    num_processes = min(len(possible_moves), mp.cpu_count())
+    
+    args_list = []
+    for move in possible_moves:
         new_board = board.copy()
         new_board.add_disk(move, max_player, update_display=False)
-        value = min_value(new_board, ai_level - 1, -float('inf'), float('inf'), 3 - max_player)
+        args_list.append((new_board.grid.copy(), ai_level - 1, max_player, move))
+    
+    with mp.Pool(processes=num_processes) as pool:
+        results = pool.map(evaluate_move_parallel, args_list)
+    
+    best_move = None
+    best_value = -float('inf')
+    for move, value in results:
         if value > best_value:
             best_value = value
             best_move = move
+    
     queue.put(best_move)
+
+
+def evaluate_move_parallel(args):
+    """Fonction worker pour évaluer un coup en parallèle"""
+    grid, depth, max_player, move = args
+    board = Board()
+    board.grid = grid
+    value = min_value(board, depth, -float('inf'), float('inf'), 3 - max_player)
+    return (move, value)
 
 class Board:
     grid = np.array([[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0],
@@ -63,26 +103,20 @@ class Board:
         elif winner != 0:
             return -1000
         else:
-            # Heuristic evaluation
             score = 0
             opponent = 3 - player
-            # Check all possible 4-cell windows
-            # Horizontal
             for row in range(6):
                 for col in range(4):
                     window = [self.grid[col + i][row] for i in range(4)]
                     score += self.evaluate_window(window, player)
-            # Vertical
             for col in range(7):
                 for row in range(3):
                     window = [self.grid[col][row + i] for i in range(4)]
                     score += self.evaluate_window(window, player)
-            # Diagonal /
             for col in range(4):
                 for row in range(3):
                     window = [self.grid[col + i][row + i] for i in range(4)]
                     score += self.evaluate_window(window, player)
-            # Diagonal \
             for col in range(4):
                 for row in range(3, 6):
                     window = [self.grid[col + i][row - i] for i in range(4)]
@@ -102,7 +136,7 @@ class Board:
         elif player_count == 2 and empty_count == 2:
             score += 2
         if opponent_count == 3 and empty_count == 1:
-            score -= 80  # Block opponent's threat
+            score -= 80
         return score
 
     def copy(self):
@@ -139,25 +173,21 @@ class Board:
         return self.grid[column][5] != 0
 
     def check_victory(self):
-        # Horizontal alignment check
         for line in range(6):
             for horizontal_shift in range(4):
                 cells = [self.grid[horizontal_shift + i][line] for i in range(4)]
                 if cells[0] != 0 and all(c == cells[0] for c in cells):
                     return cells[0]
-        # Vertical alignment check
         for column in range(7):
             for vertical_shift in range(3):
                 cells = [self.grid[column][vertical_shift + i] for i in range(4)]
                 if cells[0] != 0 and all(c == cells[0] for c in cells):
                     return cells[0]
-        # Diagonal alignment check /
         for horizontal_shift in range(4):
             for vertical_shift in range(3):
                 cells = [self.grid[horizontal_shift + i][vertical_shift + i] for i in range(4)]
                 if cells[0] != 0 and all(c == cells[0] for c in cells):
                     return cells[0]
-        # Diagonal alignment check \
         for horizontal_shift in range(4):
             for vertical_shift in range(3):
                 cells = [self.grid[horizontal_shift + i][5 - vertical_shift - i] for i in range(4)]
@@ -189,6 +219,8 @@ class Connect4:
         self.handle_turn()
 
     def move(self, column):
+        if column is None:
+            return
         if not self.board.column_filled(column):
             self.board.add_disk(column, self.current_player())
             self.handle_turn()
@@ -231,54 +263,59 @@ class Connect4:
             self.human_turn = True
 
 
-game = Connect4()
+def main():
+    global game, window, canvas1, disks, information, combobox_player1, combobox_player2, row_width
 
-# Graphical settings
-width = 700
-row_width = width // 7
-row_height = row_width
-height = row_width * 6
-row_margin = row_height // 10
+    game = Connect4()
 
-window = tk.Tk()
-window.title("Connect 4")
-canvas1 = tk.Canvas(window, bg="blue", width=width, height=height)
+    width = 700
+    row_width = width // 7
+    row_height = row_width
+    height = row_width * 6
+    row_margin = row_height // 10
 
-# Drawing the grid
-for i in range(7):
-    disks.append(list())
-    for j in range(5, -1, -1):
-        disks[i].append(canvas1.create_oval(row_margin + i * row_width, row_margin + j * row_height, (i + 1) * row_width - row_margin,
-                            (j + 1) * row_height - row_margin, fill='white'))
+    window = tk.Tk()
+    window.title("Connect 4")
+    canvas1 = tk.Canvas(window, bg="blue", width=width, height=height)
+
+    for i in range(7):
+        disks.append(list())
+        for j in range(5, -1, -1):
+            disks[i].append(canvas1.create_oval(row_margin + i * row_width, row_margin + j * row_height, (i + 1) * row_width - row_margin,
+                                (j + 1) * row_height - row_margin, fill='white'))
 
 
-canvas1.grid(row=0, column=0, columnspan=2)
+    canvas1.grid(row=0, column=0, columnspan=2)
 
-information = tk.Label(window, text="")
-information.grid(row=1, column=0, columnspan=2)
+    information = tk.Label(window, text="")
+    information.grid(row=1, column=0, columnspan=2)
 
-label_player1 = tk.Label(window, text="Player 1: ")
-label_player1.grid(row=2, column=0)
-combobox_player1 = ttk.Combobox(window, state='readonly')
-combobox_player1.grid(row=2, column=1)
+    label_player1 = tk.Label(window, text="Player 1: ")
+    label_player1.grid(row=2, column=0)
+    combobox_player1 = ttk.Combobox(window, state='readonly')
+    combobox_player1.grid(row=2, column=1)
 
-label_player2 = tk.Label(window, text="Player 2: ")
-label_player2.grid(row=3, column=0)
-combobox_player2 = ttk.Combobox(window, state='readonly')
-combobox_player2.grid(row=3, column=1)
+    label_player2 = tk.Label(window, text="Player 2: ")
+    label_player2.grid(row=3, column=0)
+    combobox_player2 = ttk.Combobox(window, state='readonly')
+    combobox_player2.grid(row=3, column=1)
 
-combobox_player1['values'] = player_type
-combobox_player1.current(0)
-combobox_player2['values'] = player_type
-combobox_player2.current(6)
+    combobox_player1['values'] = player_type
+    combobox_player1.current(0)
+    combobox_player2['values'] = player_type
+    combobox_player2.current(6)
 
-button2 = tk.Button(window, text='New game', command=game.launch)
-button2.grid(row=4, column=0)
+    button2 = tk.Button(window, text='New game', command=game.launch)
+    button2.grid(row=4, column=0)
 
-button = tk.Button(window, text='Quit', command=window.destroy)
-button.grid(row=4, column=1)
+    button = tk.Button(window, text='Quit', command=window.destroy)
+    button.grid(row=4, column=1)
 
-# Mouse handling
-canvas1.bind('<Button-1>', game.click)
+    canvas1.bind('<Button-1>', game.click)
 
-window.mainloop()
+    window.mainloop()
+
+
+if __name__ == "__main__":
+    mp.freeze_support()
+    main()

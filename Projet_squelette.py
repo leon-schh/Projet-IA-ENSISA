@@ -10,169 +10,28 @@ disk_color = ['white', 'red', 'orange']
 disks = list()
 
 player_type = ['human']
-for i in range(10):
+for i in range(42):
     player_type.append('AI: alpha-beta level '+str(i+1))
 
 def alpha_beta_decision(board, turn, ai_level, queue, max_player):
-    """Décision alpha-beta : choisit le meilleur coup pour le joueur max_player."""
-    best_move = None
-    best_value = float('-inf')
-    alpha = float('-inf')
-    beta = float('inf')
-    
-    for move in board.get_possible_moves():
-        new_board = board.copy()
-        new_board.add_disk(move, max_player, update_display=False)
-        
-        # Si ce coup est gagnant, on le joue immédiatement
-        if new_board.check_victory():
-            queue.put(move)
-            return
-        
-        # Sinon on évalue avec alpha-beta
-        opponent = 3 - max_player
-        value = min_value(new_board, ai_level - 1, alpha, beta, max_player, opponent)
-        
-        if value > best_value:
-            best_value = value
-            best_move = move
-        alpha = max(alpha, best_value)
-    
-    queue.put(best_move)
-
-def max_value(board, depth, alpha, beta, max_player, current_player):
-    """Fonction max de l'algorithme alpha-beta."""
-    # Condition d'arrêt
-    if board.check_victory():
-        return float('-inf')  # L'adversaire vient de gagner
-    if depth == 0 or len(board.get_possible_moves()) == 0:
-        return board.eval(max_player)
-    
-    value = float('-inf')
-    for move in board.get_possible_moves():
-        new_board = board.copy()
-        new_board.add_disk(move, current_player, update_display=False)
-        
-        if new_board.check_victory():
-            return float('inf')  # On gagne
-        
-        opponent = 3 - current_player
-        value = max(value, min_value(new_board, depth - 1, alpha, beta, max_player, opponent))
-        
-        if value >= beta:
-            return value  # Élagage beta
-        alpha = max(alpha, value)
-    
-    return value
-
-def min_value(board, depth, alpha, beta, max_player, current_player):
-    """Fonction min de l'algorithme alpha-beta."""
-    # Condition d'arrêt
-    if board.check_victory():
-        return float('inf')  # On vient de gagner
-    if depth == 0 or len(board.get_possible_moves()) == 0:
-        return board.eval(max_player)
-    
-    value = float('inf')
-    for move in board.get_possible_moves():
-        new_board = board.copy()
-        new_board.add_disk(move, current_player, update_display=False)
-        
-        if new_board.check_victory():
-            return float('-inf')  # L'adversaire gagne
-        
-        opponent = 3 - current_player
-        value = min(value, max_value(new_board, depth - 1, alpha, beta, max_player, opponent))
-        
-        if value <= alpha:
-            return value  # Élagage alpha
-        beta = min(beta, value)
-    
-    return value
+    # random move (to modify)
+    queue.put(board.get_possible_moves()[rnd.randint(0, len(board.get_possible_moves()) - 1)])
 
 class Board:
-    def __init__(self):
-        self.grid = np.array([[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
+    grid = np.array([[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
 
 
     def eval(self, player):
-        """
-        Évalue la grille pour le joueur donné.
-        Score positif = avantage pour player, négatif = avantage adversaire.
-        """
-        score = 0
-        opponent = 3 - player
-        
-        # Évaluation de toutes les fenêtres de 4 cases
-        # Horizontales
-        for line in range(6):
-            for col in range(4):
-                window = [self.grid[col + i][line] for i in range(4)]
-                score += self.evaluate_window(window, player, opponent)
-        
-        # Verticales
-        for col in range(7):
-            for line in range(3):
-                window = [self.grid[col][line + i] for i in range(4)]
-                score += self.evaluate_window(window, player, opponent)
-        
-        # Diagonales montantes
-        for col in range(4):
-            for line in range(3):
-                window = [self.grid[col + i][line + i] for i in range(4)]
-                score += self.evaluate_window(window, player, opponent)
-        
-        # Diagonales descendantes
-        for col in range(4):
-            for line in range(3, 6):
-                window = [self.grid[col + i][line - i] for i in range(4)]
-                score += self.evaluate_window(window, player, opponent)
-        
-        # Bonus pour le contrôle du centre
-        center_col = [self.grid[3][i] for i in range(6)]
-        score += center_col.count(player) * 3
-        score -= center_col.count(opponent) * 3
-        
-        return score
-    
-    def evaluate_window(self, window, player, opponent):
-        """Évalue une fenêtre de 4 cases."""
-        score = 0
-        player_count = window.count(player)
-        opponent_count = window.count(opponent)
-        empty_count = window.count(0)
-        
-        # Si la fenêtre contient des pions des deux joueurs, elle est bloquée
-        if player_count > 0 and opponent_count > 0:
-            return 0
-        
-        # Score pour le joueur
-        if player_count == 3 and empty_count == 1:
-            score += 50  # Menace de victoire
-        elif player_count == 2 and empty_count == 2:
-            score += 10
-        elif player_count == 1 and empty_count == 3:
-            score += 1
-        
-        # Score pour l'adversaire (négatif)
-        if opponent_count == 3 and empty_count == 1:
-            score -= 50  # Menace adverse
-        elif opponent_count == 2 and empty_count == 2:
-            score -= 10
-        elif opponent_count == 1 and empty_count == 3:
-            score -= 1
-        
-        return score
+        return 0
 
     def copy(self):
         new_board = Board()
-        new_board.grid = np.copy(self.grid)
+        new_board.grid = np.array(self.grid, copy=True)
         return new_board
 
     def reinit(self):
-        self.grid = np.array([[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
+        self.grid.fill(0)
         for i in range(7):
             for j in range(6):
                 canvas1.itemconfig(disks[i][j], fill=disk_color[0])
@@ -191,11 +50,10 @@ class Board:
     def add_disk(self, column, player, update_display=True):
         for j in range(6):
             if self.grid[column][j] == 0:
-                self.grid[column][j] = player
-                if update_display:
-                    canvas1.itemconfig(disks[column][j], fill=disk_color[player])
-                return True
-        return False  # Colonne pleine
+                break
+        self.grid[column][j] = player
+        if update_display:
+            canvas1.itemconfig(disks[column][j], fill=disk_color[player])
 
     def column_filled(self, column):
         return self.grid[column][5] != 0
